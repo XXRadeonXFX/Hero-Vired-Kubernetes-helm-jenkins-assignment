@@ -1,0 +1,13 @@
+replicaCount: 1
+
+frontend:
+  image: xxradeonxfx/learner-frontend:latest
+  containerPort: 3000
+  nodePort: 30679
+
+backend:
+  image: xxradeonxfx/learner-backend:latest
+  containerPort: 5000
+  mongoUri: "mongodb://mongodb-service.database.svc.cluster.local:27017/"
+
+resources: {}

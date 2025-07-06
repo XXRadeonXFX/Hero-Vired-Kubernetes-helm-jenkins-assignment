@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learner-backend
+  labels:
+    app: learner-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: learner-backend
+  template:
+    metadata:
+      labels:
+        app: learner-backend
+    spec:
+      containers:
+        - name: backend
+          image: xxradeonxfx/learner-backend:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: PORT
+              value: "5000"
+            - name: ATLAS_URI
+              value: "mongodb://mongodb-service.database.svc.cluster.local:27017/"

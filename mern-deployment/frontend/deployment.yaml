@@ -1,0 +1,27 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learner-frontend
+  labels:
+    app: learner-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: learner-frontend
+  template:
+    metadata:
+      labels:
+        app: learner-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: xxradeonxfx/learner-frontend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: REACT_APP_BACKEND_URL
+              value: "http://learner-backend:5000"  # Service name of backend
