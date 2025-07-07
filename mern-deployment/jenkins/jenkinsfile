@@ -2,7 +2,7 @@
   agent any
 
   environment {
-    DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+    DOCKERHUB_CREDENTIALS = credentials('DOCKER-PRINCE-CRED')
     FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
     BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
   }
