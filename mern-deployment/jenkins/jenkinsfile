@@ -1,44 +1,31 @@
-﻿pipeline {
+pipeline {
   agent any
 
   environment {
     DOCKERHUB_CREDENTIALS = credentials('DOCKER-PRINCE-CRED')
-    FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
     BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
   }
 
   stages {
     stage('Clone Repo') {
       steps {
-        git 'https://github.com/UnpredictablePrashant/learnerReportCS_backend'
-        // for mono-repo, make sure both backend & frontend folders are present
-      }
-    }
-
-    stage('Build Frontend Docker Image') {
-      steps {
-        dir('frontend') {
-          sh 'docker build -t $FRONTEND_IMAGE .'
-        }
+        git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend'
       }
     }
 
     stage('Build Backend Docker Image') {
       steps {
-        dir('backend') {
-          sh 'docker build -t $BACKEND_IMAGE .'
-        }
+        sh "docker build -t $BACKEND_IMAGE ."
       }
     }
 
-    stage('Push Docker Images') {
+    stage('Push Docker Image') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-          sh '''
-            echo $PASSWORD | docker login -u $USERNAME --password-stdin
-            docker push $FRONTEND_IMAGE
+        withCredentials([usernamePassword(credentialsId: 'DOCKER-PRINCE-CRED', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+          sh """
+            echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
             docker push $BACKEND_IMAGE
-          '''
+          """
         }
       }
     }
@@ -46,7 +33,7 @@
     stage('Deploy via Helm') {
       steps {
         dir('helm') {
-          sh 'helm upgrade --install mern ./mern-chart --namespace default'
+          sh "helm upgrade --install mern ./mern-chart --set backend.image=$BACKEND_IMAGE --namespace default"
         }
       }
     }
@@ -54,7 +41,7 @@
 
   post {
     success {
-      echo '✅ Deployment Successful!'
+      echo '✅ Backend Deployment Successful!'
     }
     failure {
       echo '❌ Build Failed!'
