@@ -1,7 +1,7 @@
 backend:
   name: learner-backend
   image: xxradeonxfs/learner-backend:latest
-  replicas: 2
+  replicas: 1
   port: 3000
   service:
     type: ClusterIP
@@ -16,7 +16,7 @@ backend:
 frontend:
   name: learner-frontend
   image: xxradeonxfs/learner-frontend:latest
-  replicas: 2
+  replicas: 1
   port: 3000
   service:
     type: LoadBalancer
