@@ -3,8 +3,8 @@ pipeline {
   environment {
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
     AWS_CREDS_ID    = 'PRINCE-AWS-CRED'
-    BACKEND_IMAGE   = "xxradeonxfx/learner-backend:latest"
-    FRONTEND_IMAGE  = "xxradeonxfx/learner-frontend:latest"
+    BACKEND_IMAGE   = "xxradeonxfs/learner-backend:latest"
+    FRONTEND_IMAGE  = "xxradeonxfs/learner-frontend:latest"
     CLUSTER_NAME    = "prince-eks"
     REGION          = "ap-south-1"
     KUBECONFIG      = "/var/lib/jenkins/.kube/config"
@@ -93,193 +93,96 @@ pipeline {
               echo "Creating/checking database namespace..."
               kubectl get namespace database || kubectl create namespace database
               
-              # Apply MongoDB deployments
-              echo "Deploying MongoDB..."
-              kubectl apply -f mongodb-deployment.yaml -n database
-              kubectl apply -f mongodb-service.yaml -n database
-              
-              # Wait for MongoDB to be ready
-              echo "Waiting for MongoDB to be ready..."
-              kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n database
+              # Check if MongoDB is already running
+              echo "Checking if MongoDB is already deployed..."
+              if kubectl get deployment mongodb -n database >/dev/null 2>&1; then
+                echo "✅ MongoDB deployment already exists and running. Skipping MongoDB deployment."
+                kubectl get pods -n database -l app=mongodb
+              else
+                echo "📦 MongoDB not found. Deploying MongoDB..."
+                # Apply MongoDB deployments
+                kubectl apply -f mongodb-deployment.yaml -n database
+                kubectl apply -f mongodb-service.yaml -n database
+                
+                # Wait for MongoDB to be ready
+                echo "⏳ Waiting for MongoDB to be ready..."
+                kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n database
+              fi
               
               # Verify deployment
+              echo "🔍 Verifying MongoDB deployment..."
               kubectl get pods -n database
+              kubectl get services -n database
             '''
           }
         }
       }
     }
     
-    stage('Create Helm Chart Structure') {
+    stage('Check and Clean Existing Application Deployments') {
       steps {
-        sh '''
-          echo "Creating Helm chart structure..."
-          mkdir -p helm/mern-chart/templates
-          
-          # Create Chart.yaml
-          cat > helm/mern-chart/Chart.yaml << 'EOF'
-apiVersion: v2
-name: mern-chart
-description: A Helm chart for MERN Stack Application
-type: application
-version: 0.1.0
-appVersion: "1.0.0"
-keywords:
-  - mern
-  - mongodb
-  - express
-  - react
-  - nodejs
-maintainers:
-  - name: DevOps Team
-    email: devops@example.com
-EOF
-
-          # Create values.yaml
-          cat > helm/mern-chart/values.yaml << 'EOF'
-backend:
-  name: learner-backend
-  image: xxradeonxfx/learner-backend:latest
-  replicas: 2
-  port: 3000
-  service:
-    type: ClusterIP
-    port: 3000
-    targetPort: 3000
-  env:
-    - name: NODE_ENV
-      value: "production"
-    - name: MONGODB_URI
-      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/learnerdb"
-
-frontend:
-  name: learner-frontend
-  image: xxradeonxfx/learner-frontend:latest
-  replicas: 2
-  port: 3000
-  service:
-    type: LoadBalancer
-    port: 80
-    targetPort: 3000
-  env:
-    - name: REACT_APP_API_URL
-      value: "http://learner-backend-service:3000"
-
-serviceAccount:
-  create: false
-  name: ""
-EOF
-
-          # Create backend deployment template
-          cat > helm/mern-chart/templates/backend-deployment.yaml << 'EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .Values.backend.name }}
-  labels:
-    app: {{ .Values.backend.name }}
-spec:
-  replicas: {{ .Values.backend.replicas }}
-  selector:
-    matchLabels:
-      app: {{ .Values.backend.name }}
-  template:
-    metadata:
-      labels:
-        app: {{ .Values.backend.name }}
-    spec:
-      containers:
-        - name: {{ .Values.backend.name }}
-          image: "{{ .Values.backend.image }}"
-          imagePullPolicy: Always
-          ports:
-            - containerPort: {{ .Values.backend.port }}
-          env:
-            {{- toYaml .Values.backend.env | nindent 12 }}
-          resources:
-            limits:
-              cpu: 500m
-              memory: 512Mi
-            requests:
-              cpu: 250m
-              memory: 256Mi
-EOF
-
-          # Create backend service template
-          cat > helm/mern-chart/templates/backend-service.yaml << 'EOF'
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ .Values.backend.name }}-service
-  labels:
-    app: {{ .Values.backend.name }}
-spec:
-  type: {{ .Values.backend.service.type }}
-  ports:
-    - port: {{ .Values.backend.service.port }}
-      targetPort: {{ .Values.backend.service.targetPort }}
-      protocol: TCP
-  selector:
-    app: {{ .Values.backend.name }}
-EOF
-
-          # Create frontend deployment template
-          cat > helm/mern-chart/templates/frontend-deployment.yaml << 'EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .Values.frontend.name }}
-  labels:
-    app: {{ .Values.frontend.name }}
-spec:
-  replicas: {{ .Values.frontend.replicas }}
-  selector:
-    matchLabels:
-      app: {{ .Values.frontend.name }}
-  template:
-    metadata:
-      labels:
-        app: {{ .Values.frontend.name }}
-    spec:
-      containers:
-        - name: {{ .Values.frontend.name }}
-          image: "{{ .Values.frontend.image }}"
-          imagePullPolicy: Always
-          ports:
-            - containerPort: {{ .Values.frontend.port }}
-          env:
-            {{- toYaml .Values.frontend.env | nindent 12 }}
-          resources:
-            limits:
-              cpu: 500m
-              memory: 512Mi
-            requests:
-              cpu: 250m
-              memory: 256Mi
-EOF
-
-          # Create frontend service template
-          cat > helm/mern-chart/templates/frontend-service.yaml << 'EOF'
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ .Values.frontend.name }}-service
-  labels:
-    app: {{ .Values.frontend.name }}
-spec:
-  type: {{ .Values.frontend.service.type }}
-  ports:
-    - port: {{ .Values.frontend.service.port }}
-      targetPort: {{ .Values.frontend.service.targetPort }}
-      protocol: TCP
-  selector:
-    app: {{ .Values.frontend.name }}
-EOF
-
-          echo "Helm chart structure created successfully!"
-          echo "Chart structure:"
-          find helm/mern-chart -type f | sort
-        '''
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+          sh '''
+            # Re-export environment variables and refresh kubeconfig
+            export KUBECONFIG=$KUBECONFIG
+            export AWS_DEFAULT_REGION=$REGION
+            
+            # Refresh the kubeconfig
+            aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+            
+            # Get account ID and set context
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
+            
+            echo "🔍 Checking for existing application deployments..."
+            
+            # Check for existing Helm releases
+            echo "📋 Checking for existing Helm releases..."
+            EXISTING_RELEASES=$(helm list -n default -q 2>/dev/null || echo "")
+            
+            if [ ! -z "$EXISTING_RELEASES" ]; then
+              echo "Found existing Helm releases: $EXISTING_RELEASES"
+              for release in $EXISTING_RELEASES; do
+                if [ "$release" != "mongodb" ] && [ "$release" != "mongo" ]; then
+                  echo "🗑️  Uninstalling existing release: $release"
+                  helm uninstall $release -n default --wait --timeout=5m || echo "Failed to uninstall $release"
+                else
+                  echo "⚠️  Skipping MongoDB-related release: $release"
+                fi
+              done
+            else
+              echo "✅ No existing Helm releases found."
+            fi
+            
+            # Check for standalone deployments (not managed by Helm)
+            echo "📋 Checking for standalone deployments..."
+            BACKEND_EXISTS=$(kubectl get deployment learner-backend -n default >/dev/null 2>&1 && echo "true" || echo "false")
+            FRONTEND_EXISTS=$(kubectl get deployment learner-frontend -n default >/dev/null 2>&1 && echo "true" || echo "false")
+            
+            if [ "$BACKEND_EXISTS" = "true" ]; then
+              echo "🗑️  Found existing backend deployment. Removing..."
+              kubectl delete deployment learner-backend -n default --wait=true --timeout=300s || echo "Failed to delete backend deployment"
+              kubectl delete service learner-backend-service -n default --wait=true --timeout=60s || echo "Backend service not found or failed to delete"
+            fi
+            
+            if [ "$FRONTEND_EXISTS" = "true" ]; then
+              echo "🗑️  Found existing frontend deployment. Removing..."
+              kubectl delete deployment learner-frontend -n default --wait=true --timeout=300s || echo "Failed to delete frontend deployment"
+              kubectl delete service learner-frontend-service -n default --wait=true --timeout=60s || echo "Frontend service not found or failed to delete"
+            fi
+            
+            # Wait for complete cleanup
+            echo "⏳ Waiting for complete cleanup..."
+            sleep 15
+            
+            # Verify cleanup
+            echo "🔍 Verifying cleanup..."
+            kubectl get deployments -n default | grep learner || echo "✅ No learner deployments found - cleanup successful!"
+            kubectl get services -n default | grep learner || echo "✅ No learner services found - cleanup successful!"
+            
+            echo "✅ Cleanup phase completed!"
+          '''
+        }
       }
     }
     
@@ -300,80 +203,48 @@ EOF
               kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
               
               # Verify Helm is available
-              echo "Checking Helm installation..."
+              echo "🔧 Checking Helm installation..."
               which helm || echo "Helm not found in PATH"
               helm version
               
-              # Check if Chart.yaml exists
-              if [ ! -f "Chart.yaml" ]; then
-                echo "Error: Chart.yaml not found in $(pwd)"
-                echo "Contents of current directory:"
-                ls -la
-                exit 1
-              fi
-              
               # Validate Helm chart
-              echo "Validating Helm chart..."
+              echo "✅ Validating Helm chart..."
               helm lint .
               
-              # Check for existing Helm releases and conflicting deployments
-              echo "Checking for existing Helm releases..."
-              helm list -n default || echo "No existing releases found"
-              
-              echo "Checking for existing deployments..."
-              kubectl get deployments -n default || echo "No existing deployments found"
-              
-              # Clean up any conflicting resources first
-              echo "Cleaning up any existing conflicting resources..."
-              
-              # Delete existing Helm releases that might conflict
-              helm uninstall mern -n default 2>/dev/null || echo "No 'mern' release to uninstall"
-              helm uninstall learner-app -n default 2>/dev/null || echo "No 'learner-app' release to uninstall"
-              
-              # Delete existing deployments and services that might conflict
-              kubectl delete deployment learner-backend -n default 2>/dev/null || echo "No learner-backend deployment to delete"
-              kubectl delete deployment learner-frontend -n default 2>/dev/null || echo "No learner-frontend deployment to delete"
-              kubectl delete service learner-backend-service -n default 2>/dev/null || echo "No learner-backend-service to delete"
-              kubectl delete service learner-frontend-service -n default 2>/dev/null || echo "No learner-frontend-service to delete"
-              
-              # Wait a moment for resources to be fully deleted
-              echo "Waiting for resources to be fully deleted..."
-              sleep 10
-              
-              # Verify cleanup
-              echo "Verifying cleanup..."
-              kubectl get deployments -n default | grep learner || echo "No learner deployments found - good!"
-              kubectl get services -n default | grep learner || echo "No learner services found - good!"
-              
               # Show what will be deployed
-              echo "Helm template preview:"
+              echo "📋 Helm template preview:"
               helm template learner-app . \\
                 --set backend.image=$BACKEND_IMAGE \\
                 --set frontend.image=$FRONTEND_IMAGE
               
               # Deploy with Helm
-              echo "Deploying application with Helm..."
+              echo "🚀 Deploying application with Helm..."
               helm upgrade --install learner-app . \\
                 --namespace default \\
                 --wait \\
                 --timeout=10m \\
                 --set backend.image=$BACKEND_IMAGE \\
                 --set frontend.image=$FRONTEND_IMAGE \\
+                --atomic \\
                 --debug
               
               # Verify deployment
-              echo "Verifying deployment..."
+              echo "🔍 Verifying deployment..."
               kubectl get pods -n default
               kubectl get services -n default
               
               # Show deployment status
-              echo "Deployment status:"
+              echo "📊 Deployment status:"
               kubectl rollout status deployment/learner-backend -n default --timeout=300s
               kubectl rollout status deployment/learner-frontend -n default --timeout=300s
               
               # Show Helm release status
-              echo "Helm release status:"
+              echo "📈 Helm release status:"
               helm status learner-app -n default
+              
+              # Show final state
+              echo "🎯 Final deployment state:"
+              kubectl get all -n default -l app.kubernetes.io/managed-by=Helm
             '''
           }
         }
@@ -390,18 +261,28 @@ EOF
             export KUBECONFIG=$KUBECONFIG
             aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
             
-            echo "=== Deployment Summary ==="
-            echo "MongoDB Pods:"
+            echo "=== 🎉 Deployment Summary ==="
+            echo "📦 MongoDB Pods (Database Namespace):"
             kubectl get pods -n database
             echo ""
-            echo "Application Pods:"
+            echo "🚀 Application Pods (Default Namespace):"
             kubectl get pods -n default
             echo ""
-            echo "Services:"
+            echo "🌐 Services:"
             kubectl get services -n default
+            kubectl get services -n database
             echo ""
-            echo "LoadBalancer External IP (Frontend):"
-            kubectl get service learner-frontend-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "External IP pending..."
+            echo "📡 LoadBalancer External IP (Frontend):"
+            EXTERNAL_IP=$(kubectl get service learner-frontend-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ ! -z "$EXTERNAL_IP" ]; then
+              echo "Frontend URL: http://$EXTERNAL_IP"
+            else
+              echo "External IP pending... Check again in a few minutes with:"
+              echo "kubectl get service learner-frontend-service -n default"
+            fi
+            echo ""
+            echo "📊 Helm Releases:"
+            helm list -n default
           '''
         }
       }
@@ -415,17 +296,28 @@ EOF
               export KUBECONFIG=$KUBECONFIG
               aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
               
-              echo "=== Debug Information ==="
+              echo "=== 🚨 Debug Information ==="
               kubectl cluster-info || echo "Cannot connect to cluster"
               kubectl get nodes || echo "Cannot get nodes"
               kubectl config current-context || echo "No current context"
               
-              echo "=== Failed Pods Information ==="
+              echo "=== 📋 Failed Pods Information ==="
+              echo "Default namespace pods:"
               kubectl get pods -n default || echo "Cannot get default namespace pods"
+              echo "Database namespace pods:"
               kubectl get pods -n database || echo "Cannot get database namespace pods"
               
-              echo "=== Recent Events ==="
-              kubectl get events --sort-by=.metadata.creationTimestamp -n default | tail -10 || echo "Cannot get events"
+              echo "=== 📋 Pod Descriptions (for failed pods) ==="
+              for pod in $(kubectl get pods -n default --field-selector=status.phase=Failed -o name 2>/dev/null); do
+                echo "Describing $pod:"
+                kubectl describe $pod -n default
+              done
+              
+              echo "=== 📋 Recent Events ==="
+              kubectl get events --sort-by=.metadata.creationTimestamp -n default | tail -20 || echo "Cannot get events"
+              
+              echo "=== 📋 Helm Releases Status ==="
+              helm list -n default || echo "Cannot get helm releases"
             '''
           }
         } catch (Exception e) {
@@ -436,7 +328,7 @@ EOF
     always {
       // Clean up docker images to save space
       sh '''
-        echo "Cleaning up Docker resources..."
+        echo "🧹 Cleaning up Docker resources..."
         docker system prune -f || true
       '''
     }
