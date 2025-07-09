@@ -11,7 +11,7 @@ backend:
     - name: NODE_ENV
       value: "production"
     - name: MONGODB_URI
-      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/learnerdb"
+      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/"
 
 frontend:
   name: learner-frontend
@@ -24,4 +24,4 @@ frontend:
     targetPort: 3000
   env:
     - name: REACT_APP_API_URL
-      value: "http://learner-backend-service:3000"
+      value: "http://localhost:3000"
