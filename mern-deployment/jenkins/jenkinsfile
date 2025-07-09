@@ -2,18 +2,25 @@ pipeline {
   agent any
 
   environment {
-    BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
-    FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
-
-    AWS_REGION     = 'ap-south-1'
-    CLUSTER_NAME   = 'prince-eks'
-
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
-    AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
+    AWS_CREDS_ID    = 'PRINCE-AWS-CRED'
+    BACKEND_IMAGE   = "xxradeonxfx/learner-backend:latest"
+    FRONTEND_IMAGE  = "xxradeonxfx/learner-frontend:latest"
+    CLUSTER_NAME    = "prince-eks"
+    REGION          = "ap-south-1"
   }
 
   stages {
+
+    stage('Configure AWS CLI for EKS') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+          sh '''
+            aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+          '''
+        }
+      }
+    }
 
     stage('Clone Backend Repo') {
       steps {
@@ -55,20 +62,7 @@ pipeline {
       }
     }
 
-    stage('Configure AWS + kubectl') {
-      steps {
-        sh '''
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-          aws configure set region $AWS_REGION
-
-          aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
-          kubectl get nodes
-        '''
-      }
-    }
-
-    stage('Deploy with Helm') {
+    stage('Deploy to EKS via Helm') {
       steps {
         dir('helm') {
           sh """
@@ -84,10 +78,10 @@ pipeline {
 
   post {
     success {
-      echo '✅ Full Deployment Successful!'
+      echo '✅ Deployment Successful!'
     }
     failure {
-      echo '❌ Build or Deployment Failed.'
+      echo '❌ Build Failed!'
     }
   }
 }
