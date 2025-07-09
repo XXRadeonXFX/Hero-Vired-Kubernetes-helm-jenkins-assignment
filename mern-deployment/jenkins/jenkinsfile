@@ -6,7 +6,7 @@ pipeline {
     FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
 
     AWS_REGION     = 'ap-south-1'
-    CLUSTER_NAME   = 'your-eks-cluster-name' // <-- change this
+    CLUSTER_NAME   = 'prince-eks'
 
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
     AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
