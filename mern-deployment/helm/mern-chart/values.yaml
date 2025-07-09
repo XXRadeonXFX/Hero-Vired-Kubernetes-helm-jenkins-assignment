@@ -1,43 +1,13 @@
-backend:
-  name: learner-backend
-  image: xxradeonxfx/learner-backend:latest
-  replicas: 1
-  port: 3000
-  service:
-    type: ClusterIP
-    port: 3000
-    targetPort: 3000
-  env:
-    - name: NODE_ENV
-      value: "production"
-    - name: ATLAS_URI  # This is what your code is looking for!
-      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/learnerdb"
-    - name: MONGODB_URI  # Keep this as backup
-      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/learnerdb"
-    - name: DB_HOST
-      value: "mongodb-service.database.svc.cluster.local"
-    - name: DB_PORT
-      value: "27017"
-    - name: DB_NAME
-      value: "learnerdb"
-    - name: PORT
-      value: "3000"
+replicaCount: 1
 
 frontend:
-  name: learner-frontend
   image: xxradeonxfx/learner-frontend:latest
-  replicas: 1
-  port: 3000
-  service:
-    type: LoadBalancer
-    port: 80
-    targetPort: 3000
-  env:
-    - name: REACT_APP_API_URL
-      value: "http://learner-backend-service:3000"
-    - name: NODE_ENV
-      value: "production"
+  containerPort: 3000
+  nodePort: 30679
 
-serviceAccount:
-  create: false
-  name: ""
+backend:
+  image: xxradeonxfx/learner-backend:latest
+  containerPort: 5000
+  mongoUri: "mongodb://mongodb-service.database.svc.cluster.local:27017/"
+
+resources: {}
