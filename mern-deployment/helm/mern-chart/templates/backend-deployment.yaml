@@ -13,12 +13,10 @@ spec:
         app: learner-backend
     spec:
       containers:
-        - name: backend
+        - name: learner-backend
           image: {{ .Values.backend.image }}
           ports:
             - containerPort: {{ .Values.backend.containerPort }}
           env:
-            - name: PORT
-              value: "{{ .Values.backend.containerPort }}"
-            - name: ATLAS_URI
-              value: "{{ .Values.backend.mongoUri }}"
+            - name: DB_URI
+              value: {{ .Values.backend.mongoUri | quote }}

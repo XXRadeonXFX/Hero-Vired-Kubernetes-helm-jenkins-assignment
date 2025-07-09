@@ -3,10 +3,11 @@ kind: Service
 metadata:
   name: learner-frontend
 spec:
-  type: NodePort
   selector:
     app: learner-frontend
+  type: NodePort
   ports:
-    - port: {{ .Values.frontend.containerPort }}
+    - protocol: TCP
+      port: {{ .Values.frontend.containerPort }}
       targetPort: {{ .Values.frontend.containerPort }}
       nodePort: {{ .Values.frontend.nodePort }}

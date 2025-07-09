@@ -2,85 +2,38 @@ pipeline {
   agent any
 
   environment {
-    DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
-    AWS_CREDS_ID    = 'PRINCE-AWS-CRED'
-    BACKEND_IMAGE   = "xxradeonxfx/learner-backend:latest"
-    FRONTEND_IMAGE  = "xxradeonxfx/learner-frontend:latest"
-    CLUSTER_NAME    = "prince-eks"
-    REGION          = "ap-south-1"
+    DOCKERHUB_CREDENTIALS = credentials('DOCKER-PRINCE-CRED')
+    BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
   }
 
   stages {
-
-    stage('Configure AWS CLI for EKS') {
+    stage('Clone Repo') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: "${env.AWS_CREDS_ID}"
-        ]]) {
-          sh '''
-            aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
-          '''
+        git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend'
+      }
+    }
+
+    stage('Build Backend Docker Image') {
+      steps {
+        sh "docker build -t $BACKEND_IMAGE ."
+      }
+    }
+
+    stage('Push Docker Image') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'DOCKER-PRINCE-CRED', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+          sh """
+            echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
+            docker push $BACKEND_IMAGE
+          """
         }
       }
     }
 
-    stage('Build & Push Backend Image') {
+    stage('Deploy via Helm') {
       steps {
-        dir('learnerReportCS_backend') {
-          withCredentials([usernamePassword(
-            credentialsId: "${env.DOCKER_CREDS_ID}",
-            usernameVariable: 'USERNAME',
-            passwordVariable: 'PASSWORD'
-          )]) {
-            sh '''
-              docker build -t $BACKEND_IMAGE .
-              echo $PASSWORD | docker login -u $USERNAME --password-stdin
-              docker push $BACKEND_IMAGE
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Build & Push Frontend Image') {
-      steps {
-        dir('learnerReportCS_frontend') {
-          withCredentials([usernamePassword(
-            credentialsId: "${env.DOCKER_CREDS_ID}",
-            usernameVariable: 'USERNAME',
-            passwordVariable: 'PASSWORD'
-          )]) {
-            sh '''
-              docker build -t $FRONTEND_IMAGE .
-              echo $PASSWORD | docker login -u $USERNAME --password-stdin
-              docker push $FRONTEND_IMAGE
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Deploy MongoDB') {
-      steps {
-        dir('mongodb') {
-          sh '''
-            kubectl apply -f mongodb-deployment.yaml
-            kubectl apply -f mongodb-service.yaml
-          '''
-        }
-      }
-    }
-
-    stage('Deploy to EKS via Helm') {
-      steps {
-        dir('mern-deployment/helm') {
-          sh '''
-            helm upgrade --install mern ./mern-chart \
-              --set backend.image=$BACKEND_IMAGE \
-              --set frontend.image=$FRONTEND_IMAGE \
-              --namespace default
-          '''
+        dir('helm') {
+          sh "helm upgrade --install mern ./mern-chart --set backend.image=$BACKEND_IMAGE --namespace default"
         }
       }
     }
@@ -88,10 +41,10 @@ pipeline {
 
   post {
     success {
-      echo '✅ All stages executed successfully!'
+      echo '✅ Backend Deployment Successful!'
     }
     failure {
-      echo '❌ Pipeline failed. Please check the logs.'
+      echo '❌ Build Failed!'
     }
   }
 }

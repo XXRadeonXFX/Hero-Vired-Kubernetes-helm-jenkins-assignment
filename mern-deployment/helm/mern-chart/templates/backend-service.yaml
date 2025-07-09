@@ -13,5 +13,7 @@ spec:
   selector:
     app: learner-backend
   ports:
-    - port: {{ .Values.backend.containerPort }}
+    - name: http
+      protocol: TCP
+      port: {{ .Values.backend.containerPort }}
       targetPort: {{ .Values.backend.containerPort }}

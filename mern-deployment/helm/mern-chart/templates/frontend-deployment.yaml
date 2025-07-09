@@ -13,7 +13,7 @@ spec:
         app: learner-frontend
     spec:
       containers:
-        - name: frontend
+        - name: learner-frontend
           image: {{ .Values.frontend.image }}
           ports:
             - containerPort: {{ .Values.frontend.containerPort }}
