@@ -13,12 +13,10 @@ pipeline {
   stages {
     stage('Configure AWS CLI for EKS') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: "${AWS_CREDS_ID}"
-        ]]) {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
           sh '''
             aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+            aws sts get-caller-identity --query Account --output text
             kubectl config use-context arn:aws:eks:$REGION:$(aws sts get-caller-identity --query Account --output text):cluster/$CLUSTER_NAME
           '''
         }
@@ -28,14 +26,10 @@ pipeline {
     stage('Build & Push Backend Image') {
       steps {
         dir('learnerReportCS_backend') {
-          withCredentials([usernamePassword(
-            credentialsId: "${DOCKER_CREDS_ID}",
-            usernameVariable: 'USERNAME',
-            passwordVariable: 'PASSWORD'
-          )]) {
+          withCredentials([string(credentialsId: "${DOCKER_CREDS_ID}", variable: 'PASSWORD')]) {
             sh '''
               docker build -t $BACKEND_IMAGE .
-              echo $PASSWORD | docker login -u $USERNAME --password-stdin
+              echo "$PASSWORD" | docker login -u xxradeonxfx --password-stdin
               docker push $BACKEND_IMAGE
             '''
           }
@@ -46,14 +40,10 @@ pipeline {
     stage('Build & Push Frontend Image') {
       steps {
         dir('learnerReportCS_frontend') {
-          withCredentials([usernamePassword(
-            credentialsId: "${DOCKER_CREDS_ID}",
-            usernameVariable: 'USERNAME',
-            passwordVariable: 'PASSWORD'
-          )]) {
+          withCredentials([string(credentialsId: "${DOCKER_CREDS_ID}", variable: 'PASSWORD')]) {
             sh '''
               docker build -t $FRONTEND_IMAGE .
-              echo $PASSWORD | docker login -u $USERNAME --password-stdin
+              echo "$PASSWORD" | docker login -u xxradeonxfx --password-stdin
               docker push $FRONTEND_IMAGE
             '''
           }
@@ -64,10 +54,9 @@ pipeline {
     stage('Deploy MongoDB') {
       steps {
         dir('mongodb') {
-          // Now explicitly mention the namespace and suppress openapi validation
           sh '''
-            kubectl apply -n database -f mongodb-deployment.yaml --validate=false
-            kubectl apply -n database -f mongodb-service.yaml --validate=false
+            kubectl apply -f mongodb-deployment.yaml --validate=false
+            kubectl apply -f mongodb-service.yaml --validate=false
           '''
         }
       }
@@ -76,23 +65,18 @@ pipeline {
     stage('Deploy to EKS via Helm') {
       steps {
         dir('mern-deployment/helm') {
-          sh '''
-            helm upgrade --install mern ./mern-chart \
-              --set backend.image=$BACKEND_IMAGE \
-              --set frontend.image=$FRONTEND_IMAGE \
-              --namespace default
-          '''
+          sh 'helm upgrade --install mern ./mern-chart'
         }
       }
     }
   }
 
   post {
-    success {
-      echo "✅ All stages executed successfully!"
-    }
     failure {
-      echo "❌ Pipeline failed. Please check the logs."
+      echo '❌ Pipeline failed. Please check the logs.'
+    }
+    success {
+      echo '✅ Deployment successful!'
     }
   }
 }
