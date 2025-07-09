@@ -8,6 +8,7 @@ pipeline {
     FRONTEND_IMAGE  = "xxradeonxfx/learner-frontend:latest"
     CLUSTER_NAME    = "prince-eks"
     REGION          = "ap-south-1"
+    KUBECONFIG      = '/var/lib/jenkins/.kube/config'
   }
 
   stages {
@@ -21,8 +22,8 @@ pipeline {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDS_ID}"]]) {
           sh '''
+            mkdir -p ~/.kube
             aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME}
-            aws sts get-caller-identity --query Account --output text
             kubectl config use-context arn:aws:eks:${REGION}:$(aws sts get-caller-identity --query Account --output text):cluster/${CLUSTER_NAME}
           '''
         }
@@ -61,6 +62,7 @@ pipeline {
       steps {
         dir('mongodb') {
           sh '''
+            echo "Using KUBECONFIG=${KUBECONFIG}"
             kubectl get namespace database || kubectl create namespace database
             kubectl apply -n database -f mongodb-deployment.yaml --validate=false
             kubectl apply -n database -f mongodb-service.yaml --validate=false
@@ -81,11 +83,11 @@ pipeline {
   }
 
   post {
+    success {
+      echo "✅ Deployment completed successfully!"
+    }
     failure {
       echo "❌ Pipeline failed. Please check the logs."
-    }
-    success {
-      echo "✅ Pipeline executed successfully!"
     }
   }
 }
