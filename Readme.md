@@ -337,39 +337,6 @@ mongo mongodb://localhost:27017
 - Network policies can be added for additional security
 - Secrets should be used for sensitive data instead of ConfigMaps
 
-## 📈 Scaling
-
-### Horizontal Scaling
-```bash
-# Scale backend
-kubectl scale deployment learner-backend --replicas=3 -n default
-
-# Scale frontend  
-kubectl scale deployment learner-frontend --replicas=2 -n default
-```
-
-### Auto-scaling
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: backend-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: learner-backend
-  minReplicas: 1
-  maxReplicas: 5
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-```
-
 ## 🚦 Pipeline Stages
 
 The Jenkins pipeline includes the following stages:
