@@ -5,7 +5,7 @@ pipeline {
     BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
     FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
 
-    AWS_REGION     = 'us-west-1'
+    AWS_REGION     = 'ap-south-1'
     CLUSTER_NAME   = 'your-eks-cluster-name' // <-- change this
 
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
