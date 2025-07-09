@@ -63,13 +63,20 @@ pipeline {
 
     stage('Deploy to EKS via Helm') {
       steps {
-        dir('mern-deployment/helm') {
-          sh '''
-            helm upgrade --install mern ./mern-chart \
-              --set backend.image=$BACKEND_IMAGE \
-              --set frontend.image=$FRONTEND_IMAGE \
-              --namespace default
-          '''
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: "${env.AWS_CREDS_ID}"
+        ]]) {
+          dir('mern-deployment/helm') {
+            sh '''
+              aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+              kubectl get nodes
+              helm upgrade --install mern ./mern-chart \
+                --set backend.image=$BACKEND_IMAGE \
+                --set frontend.image=$FRONTEND_IMAGE \
+                --namespace default
+            '''
+          }
         }
       }
     }
