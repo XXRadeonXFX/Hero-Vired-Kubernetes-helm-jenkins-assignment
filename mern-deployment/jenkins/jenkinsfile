@@ -1,6 +1,5 @@
 pipeline {
   agent any
-
   environment {
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
     AWS_CREDS_ID    = 'PRINCE-AWS-CRED'
@@ -10,14 +9,13 @@ pipeline {
     REGION          = "ap-south-1"
     KUBECONFIG      = "/var/lib/jenkins/.kube/config"
   }
-
   stages {
     stage('Checkout Code') {
       steps {
         checkout scm
       }
     }
-
+    
     stage('Configure AWS CLI for EKS') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
@@ -25,13 +23,23 @@ pipeline {
             mkdir -p $(dirname "$KUBECONFIG")
             export KUBECONFIG=$KUBECONFIG
             aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
-            kubectl config use-context arn:aws:eks:$REGION:$(aws sts get-caller-identity --query Account --output text):cluster/$CLUSTER_NAME
+            
+            # Get account ID for context
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            
+            # Set the context
+            kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
+            
+            # Verify connection
             kubectl get nodes
+            
+            # Verify authentication and save token for later stages
+            kubectl auth can-i get pods --namespace=default || echo "Warning: Limited permissions"
           '''
         }
       }
     }
-
+    
     stage('Build & Push Backend Image') {
       steps {
         dir('learnerReportCS_backend') {
@@ -45,7 +53,7 @@ pipeline {
         }
       }
     }
-
+    
     stage('Build & Push Frontend Image') {
       steps {
         dir('learnerReportCS_frontend') {
@@ -59,38 +67,122 @@ pipeline {
         }
       }
     }
-
+    
     stage('Deploy MongoDB') {
       steps {
-        dir('mongodb') {
-          sh '''
-            export KUBECONFIG=$KUBECONFIG
-            kubectl get namespace database || kubectl create namespace database
-            kubectl apply -f mongodb-deployment.yaml -n database
-            kubectl apply -f mongodb-service.yaml -n database
-          '''
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+          dir('mongodb') {
+            sh '''
+              # Re-export environment variables and refresh kubeconfig
+              export KUBECONFIG=$KUBECONFIG
+              export AWS_DEFAULT_REGION=$REGION
+              
+              # Refresh the kubeconfig to ensure we have valid credentials
+              aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+              
+              # Get account ID and set context
+              ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+              kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
+              
+              # Verify we can connect
+              echo "Checking cluster connection..."
+              kubectl cluster-info
+              
+              # Create namespace if it doesn't exist
+              echo "Creating/checking database namespace..."
+              kubectl get namespace database || kubectl create namespace database
+              
+              # Apply MongoDB deployments
+              echo "Deploying MongoDB..."
+              kubectl apply -f mongodb-deployment.yaml -n database
+              kubectl apply -f mongodb-service.yaml -n database
+              
+              # Verify deployment
+              kubectl get pods -n database
+            '''
+          }
         }
       }
     }
-
+    
     stage('Deploy to EKS via Helm') {
       steps {
-        dir('helm/mern-chart') {
-          sh '''
-            export KUBECONFIG=$KUBECONFIG
-            helm upgrade --install learner-app . --namespace default --wait
-          '''
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+          dir('helm/mern-chart') {
+            sh '''
+              # Re-export environment variables and refresh kubeconfig
+              export KUBECONFIG=$KUBECONFIG
+              export AWS_DEFAULT_REGION=$REGION
+              
+              # Refresh the kubeconfig
+              aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+              
+              # Get account ID and set context
+              ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+              kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
+              
+              # Verify Helm is available
+              which helm || echo "Helm not found in PATH"
+              
+              # Deploy with Helm
+              echo "Deploying application with Helm..."
+              helm upgrade --install learner-app . \\
+                --namespace default \\
+                --wait \\
+                --timeout=10m \\
+                --set backend.image=$BACKEND_IMAGE \\
+                --set frontend.image=$FRONTEND_IMAGE
+              
+              # Verify deployment
+              kubectl get pods -n default
+              kubectl get services -n default
+            '''
+          }
         }
       }
     }
   }
-
+  
   post {
     success {
       echo "✅ Deployment successful!"
+      script {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+          sh '''
+            export KUBECONFIG=$KUBECONFIG
+            aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+            echo "=== Deployment Summary ==="
+            kubectl get pods -n database
+            kubectl get pods -n default
+            kubectl get services -n default
+          '''
+        }
+      }
     }
     failure {
       echo "❌ Pipeline failed. Check the logs."
+      script {
+        try {
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+            sh '''
+              export KUBECONFIG=$KUBECONFIG
+              aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME --region $REGION
+              echo "=== Debug Information ==="
+              kubectl cluster-info || echo "Cannot connect to cluster"
+              kubectl get nodes || echo "Cannot get nodes"
+              kubectl config current-context || echo "No current context"
+            '''
+          }
+        } catch (Exception e) {
+          echo "Failed to get debug information: ${e.getMessage()}"
+        }
+      }
+    }
+    always {
+      // Clean up docker images to save space
+      sh '''
+        docker system prune -f || true
+      '''
     }
   }
 }
