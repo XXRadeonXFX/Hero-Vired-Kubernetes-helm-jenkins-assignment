@@ -2,27 +2,30 @@ pipeline {
   agent any
 
   environment {
-    DOCKERHUB_CREDENTIALS = credentials('DOCKER-PRINCE-CRED')
     BACKEND_IMAGE  = "xxradeonxfx/learner-backend:latest"
+    FRONTEND_IMAGE = "xxradeonxfx/learner-frontend:latest"
+
+    AWS_REGION     = 'us-west-1'
+    CLUSTER_NAME   = 'your-eks-cluster-name' // <-- change this
+
+    DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
+    AWS_ACCESS_KEY_ID     = credentials('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
   }
 
   stages {
-    stage('Clone Repo') {
+
+    stage('Clone Backend Repo') {
       steps {
         git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend'
       }
     }
 
-    stage('Build Backend Docker Image') {
+    stage('Build & Push Backend Image') {
       steps {
-        sh "docker build -t $BACKEND_IMAGE ."
-      }
-    }
-
-    stage('Push Docker Image') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'DOCKER-PRINCE-CRED', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+        withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
           sh """
+            docker build -t $BACKEND_IMAGE .
             echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
             docker push $BACKEND_IMAGE
           """
@@ -30,10 +33,50 @@ pipeline {
       }
     }
 
-    stage('Deploy via Helm') {
+    stage('Clone Frontend Repo') {
+      steps {
+        dir('frontend') {
+          git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_frontend'
+        }
+      }
+    }
+
+    stage('Build & Push Frontend Image') {
+      steps {
+        dir('frontend') {
+          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+            sh """
+              docker build -t $FRONTEND_IMAGE .
+              echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
+              docker push $FRONTEND_IMAGE
+            """
+          }
+        }
+      }
+    }
+
+    stage('Configure AWS + kubectl') {
+      steps {
+        sh '''
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          aws configure set region $AWS_REGION
+
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+          kubectl get nodes
+        '''
+      }
+    }
+
+    stage('Deploy with Helm') {
       steps {
         dir('helm') {
-          sh "helm upgrade --install mern ./mern-chart --set backend.image=$BACKEND_IMAGE --namespace default"
+          sh """
+            helm upgrade --install mern ./mern-chart \
+              --set backend.image=$BACKEND_IMAGE \
+              --set frontend.image=$FRONTEND_IMAGE \
+              --namespace default
+          """
         }
       }
     }
@@ -41,10 +84,10 @@ pipeline {
 
   post {
     success {
-      echo '✅ Backend Deployment Successful!'
+      echo '✅ Full Deployment Successful!'
     }
     failure {
-      echo '❌ Build Failed!'
+      echo '❌ Build or Deployment Failed.'
     }
   }
 }
