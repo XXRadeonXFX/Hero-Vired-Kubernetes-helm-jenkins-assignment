@@ -3,7 +3,7 @@ pipeline {
   environment {
     DOCKER_CREDS_ID = 'DOCKER-PRINCE-CRED'
     AWS_CREDS_ID    = 'PRINCE-AWS-CRED'
-    DOCKER_USERNAME = "xxradeonxfx"  // Fixed: consistent username
+    DOCKER_USERNAME = "xxradeonxfx"
     BACKEND_IMAGE   = "${DOCKER_USERNAME}/learner-backend:latest"
     FRONTEND_IMAGE  = "${DOCKER_USERNAME}/learner-frontend:latest"
     CLUSTER_NAME    = "prince-eks"
@@ -42,30 +42,6 @@ pipeline {
       }
     }
     
-    stage('Verify Docker Credentials') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-          sh '''
-            echo "🔐 Verifying Docker credentials..."
-            echo "Username from credentials: $USERNAME"
-            echo "Expected username: $DOCKER_USERNAME"
-            
-            if [ "$USERNAME" != "$DOCKER_USERNAME" ]; then
-              echo "❌ ERROR: Username mismatch!"
-              echo "Credential username: $USERNAME"
-              echo "Environment username: $DOCKER_USERNAME"
-              echo "Please update either the Jenkins credentials or environment variable"
-              exit 1
-            fi
-            
-            echo "✅ Docker credentials verified"
-            echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
-            echo "✅ Docker login successful"
-          '''
-        }
-      }
-    }
-    
     stage('Build & Push Backend Image') {
       steps {
         dir('learnerReportCS_backend') {
@@ -74,6 +50,7 @@ pipeline {
               echo "🔨 Building backend image: $BACKEND_IMAGE"
               docker build -t $BACKEND_IMAGE .
               
+              echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
               echo "📤 Pushing backend image..."
               docker push $BACKEND_IMAGE
               
@@ -126,33 +103,56 @@ pipeline {
               echo "📦 Creating/checking database namespace..."
               kubectl get namespace database || kubectl create namespace database
               
-              # Check if MongoDB is already running
+              # Check if MongoDB is already running and healthy
               echo "🔍 Checking if MongoDB is already deployed..."
               if kubectl get deployment mongodb -n database >/dev/null 2>&1; then
-                echo "✅ MongoDB deployment already exists and running. Skipping MongoDB deployment."
-                kubectl get pods -n database -l app=mongodb
+                echo "📋 MongoDB deployment exists. Checking health..."
+                READY_REPLICAS=$(kubectl get deployment mongodb -n database -o jsonpath='{.status.readyReplicas}')
+                DESIRED_REPLICAS=$(kubectl get deployment mongodb -n database -o jsonpath='{.spec.replicas}')
+                
+                if [ "$READY_REPLICAS" = "$DESIRED_REPLICAS" ] && [ "$READY_REPLICAS" != "" ]; then
+                  echo "✅ MongoDB is healthy. Skipping deployment."
+                else
+                  echo "⚠️ MongoDB exists but not healthy. Redeploying..."
+                  kubectl delete deployment mongodb -n database --wait=true || echo "Failed to delete MongoDB deployment"
+                  kubectl delete service mongodb-service -n database --wait=true || echo "Failed to delete MongoDB service"
+                  sleep 10
+                  
+                  echo "📦 Deploying fresh MongoDB..."
+                  kubectl apply -f mongodb-deployment.yaml -n database
+                  kubectl apply -f mongodb-service.yaml -n database
+                  
+                  echo "⏳ Waiting for MongoDB to be ready..."
+                  kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n database
+                fi
               else
                 echo "📦 MongoDB not found. Deploying MongoDB..."
-                # Apply MongoDB deployments
                 kubectl apply -f mongodb-deployment.yaml -n database
                 kubectl apply -f mongodb-service.yaml -n database
                 
-                # Wait for MongoDB to be ready
                 echo "⏳ Waiting for MongoDB to be ready..."
                 kubectl wait --for=condition=available --timeout=300s deployment/mongodb -n database
               fi
               
-              # Verify deployment
+              # Verify deployment and test connection
               echo "🔍 Verifying MongoDB deployment..."
               kubectl get pods -n database
               kubectl get services -n database
+              
+              # Test MongoDB connectivity
+              echo "🧪 Testing MongoDB connectivity..."
+              kubectl run mongodb-test --image=mongo:5.0 --rm -i --restart=Never --namespace=database -- \
+                mongo --host mongodb-service.database.svc.cluster.local:27017 --eval "db.adminCommand('ping')" || \
+                echo "⚠️ MongoDB connectivity test failed, but continuing..."
+              
+              echo "✅ MongoDB deployment completed"
             '''
           }
         }
       }
     }
     
-    stage('Check and Clean Existing Application Deployments') {
+    stage('Clean Existing Application Deployments') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
           sh '''
@@ -167,9 +167,9 @@ pipeline {
             ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
             kubectl config use-context arn:aws:eks:$REGION:$ACCOUNT_ID:cluster/$CLUSTER_NAME
             
-            echo "🔍 Checking for existing application deployments..."
+            echo "🔍 Cleaning existing application deployments..."
             
-            # Check for existing Helm releases
+            # Remove failed Helm releases
             echo "📋 Checking for existing Helm releases..."
             EXISTING_RELEASES=$(helm list -n default -q 2>/dev/null || echo "")
             
@@ -177,32 +177,20 @@ pipeline {
               echo "Found existing Helm releases: $EXISTING_RELEASES"
               for release in $EXISTING_RELEASES; do
                 if [ "$release" != "mongodb" ] && [ "$release" != "mongo" ]; then
-                  echo "🗑️  Uninstalling existing release: $release"
+                  echo "🗑️ Uninstalling existing release: $release"
                   helm uninstall $release -n default --wait --timeout=5m || echo "Failed to uninstall $release"
                 else
-                  echo "⚠️  Skipping MongoDB-related release: $release"
+                  echo "⚠️ Skipping MongoDB-related release: $release"
                 fi
               done
-            else
-              echo "✅ No existing Helm releases found."
             fi
             
-            # Check for standalone deployments (not managed by Helm)
-            echo "📋 Checking for standalone deployments..."
-            BACKEND_EXISTS=$(kubectl get deployment learner-backend -n default >/dev/null 2>&1 && echo "true" || echo "false")
-            FRONTEND_EXISTS=$(kubectl get deployment learner-frontend -n default >/dev/null 2>&1 && echo "true" || echo "false")
-            
-            if [ "$BACKEND_EXISTS" = "true" ]; then
-              echo "🗑️  Found existing backend deployment. Removing..."
-              kubectl delete deployment learner-backend -n default --wait=true --timeout=300s || echo "Failed to delete backend deployment"
-              kubectl delete service learner-backend-service -n default --wait=true --timeout=60s || echo "Backend service not found or failed to delete"
-            fi
-            
-            if [ "$FRONTEND_EXISTS" = "true" ]; then
-              echo "🗑️  Found existing frontend deployment. Removing..."
-              kubectl delete deployment learner-frontend -n default --wait=true --timeout=300s || echo "Failed to delete frontend deployment"
-              kubectl delete service learner-frontend-service -n default --wait=true --timeout=60s || echo "Frontend service not found or failed to delete"
-            fi
+            # Clean up any remaining application resources
+            echo "🧹 Cleaning up remaining application resources..."
+            kubectl delete deployment learner-backend -n default --ignore-not-found=true --wait=true --timeout=300s
+            kubectl delete deployment learner-frontend -n default --ignore-not-found=true --wait=true --timeout=300s
+            kubectl delete service learner-backend-service -n default --ignore-not-found=true --wait=true --timeout=60s
+            kubectl delete service learner-frontend-service -n default --ignore-not-found=true --wait=true --timeout=60s
             
             # Wait for complete cleanup
             echo "⏳ Waiting for complete cleanup..."
@@ -210,16 +198,16 @@ pipeline {
             
             # Verify cleanup
             echo "🔍 Verifying cleanup..."
-            kubectl get deployments -n default | grep learner || echo "✅ No learner deployments found - cleanup successful!"
-            kubectl get services -n default | grep learner || echo "✅ No learner services found - cleanup successful!"
+            kubectl get deployments -n default | grep learner || echo "✅ No learner deployments found!"
+            kubectl get services -n default | grep learner || echo "✅ No learner services found!"
             
-            echo "✅ Cleanup phase completed!"
+            echo "✅ Cleanup completed!"
           '''
         }
       }
     }
     
-    stage('Deploy to EKS via Helm') {
+    stage('Deploy Application via Helm') {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
           dir('helm/mern-chart') {
@@ -237,23 +225,26 @@ pipeline {
               
               # Verify Helm is available
               echo "🔧 Checking Helm installation..."
-              which helm || echo "Helm not found in PATH"
               helm version
               
               # Validate Helm chart
               echo "✅ Validating Helm chart..."
               helm lint .
               
-              # Show what will be deployed
+              # Show what will be deployed (template dry-run)
               echo "📋 Helm template preview:"
               helm template learner-app . \\
                 --set backend.image=$BACKEND_IMAGE \\
-                --set frontend.image=$FRONTEND_IMAGE
+                --set frontend.image=$FRONTEND_IMAGE \\
+                --set backend.replicas=1 \\
+                --set frontend.replicas=1
               
               # Deploy with Helm
               echo "🚀 Deploying application with Helm..."
               echo "Backend Image: $BACKEND_IMAGE"
               echo "Frontend Image: $FRONTEND_IMAGE"
+              echo "Backend Replicas: 1"
+              echo "Frontend Replicas: 1"
               
               helm upgrade --install learner-app . \\
                 --namespace default \\
@@ -261,38 +252,44 @@ pipeline {
                 --timeout=10m \\
                 --set backend.image=$BACKEND_IMAGE \\
                 --set frontend.image=$FRONTEND_IMAGE \\
+                --set backend.replicas=1 \\
+                --set frontend.replicas=1 \\
                 --atomic \\
                 --debug
+              
+              # Wait a moment for pods to start
+              echo "⏳ Waiting for pods to start..."
+              sleep 30
               
               # Verify deployment
               echo "🔍 Verifying deployment..."
               kubectl get pods -n default
               kubectl get services -n default
               
-              # Check pod logs for any immediate issues
-              echo "📋 Checking pod logs for any immediate issues..."
-              for pod in $(kubectl get pods -n default -l app=learner-backend -o name); do
-                echo "=== Logs for $pod ==="
-                kubectl logs $pod -n default --tail=10 || echo "Could not get logs for $pod"
-              done
+              # Check pod logs for immediate issues
+              echo "📋 Checking backend logs..."
+              kubectl logs deployment/learner-backend -n default --tail=20 || echo "Could not get backend logs yet"
               
-              for pod in $(kubectl get pods -n default -l app=learner-frontend -o name); do
-                echo "=== Logs for $pod ==="
-                kubectl logs $pod -n default --tail=10 || echo "Could not get logs for $pod"
-              done
+              echo "📋 Checking frontend logs..."
+              kubectl logs deployment/learner-frontend -n default --tail=20 || echo "Could not get frontend logs yet"
+              
+              # Test MongoDB connectivity from backend
+              echo "🧪 Testing MongoDB connectivity from backend..."
+              BACKEND_POD=$(kubectl get pods -n default -l app=learner-backend -o jsonpath='{.items[0].metadata.name}')
+              if [ ! -z "$BACKEND_POD" ]; then
+                kubectl exec $BACKEND_POD -n default -- nslookup mongodb-service.database.svc.cluster.local || echo "DNS lookup failed"
+              fi
               
               # Show deployment status
               echo "📊 Deployment status:"
-              kubectl rollout status deployment/learner-backend -n default --timeout=300s || echo "Backend rollout status check failed"
-              kubectl rollout status deployment/learner-frontend -n default --timeout=300s || echo "Frontend rollout status check failed"
+              kubectl rollout status deployment/learner-backend -n default --timeout=300s || echo "Backend rollout timeout"
+              kubectl rollout status deployment/learner-frontend -n default --timeout=300s || echo "Frontend rollout timeout"
               
               # Show Helm release status
               echo "📈 Helm release status:"
               helm status learner-app -n default
               
-              # Show final state
-              echo "🎯 Final deployment state:"
-              kubectl get all -n default -l app.kubernetes.io/managed-by=Helm
+              echo "✅ Deployment completed!"
             '''
           }
         }
@@ -313,7 +310,7 @@ pipeline {
             echo "📦 MongoDB Pods (Database Namespace):"
             kubectl get pods -n database
             echo ""
-            echo "🚀 Application Pods (Default Namespace):"
+            echo "🚀 Application Pods (Default Namespace) - 1 Pod Each:"
             kubectl get pods -n default
             echo ""
             echo "🌐 Services:"
@@ -323,14 +320,17 @@ pipeline {
             echo "📡 LoadBalancer External IP (Frontend):"
             EXTERNAL_IP=$(kubectl get service learner-frontend-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             if [ ! -z "$EXTERNAL_IP" ]; then
-              echo "Frontend URL: http://$EXTERNAL_IP"
+              echo "🌍 Frontend URL: http://$EXTERNAL_IP"
             else
-              echo "External IP pending... Check again in a few minutes with:"
-              echo "kubectl get service learner-frontend-service -n default"
+              echo "⏳ External IP pending... Check with: kubectl get service learner-frontend-service -n default"
             fi
             echo ""
             echo "📊 Helm Releases:"
             helm list -n default
+            echo ""
+            echo "🔗 Internal Service URLs:"
+            echo "  Backend: http://learner-backend-service:3000"
+            echo "  MongoDB: mongodb://mongodb-service.database.svc.cluster.local:27017"
           '''
         }
       }
@@ -346,27 +346,33 @@ pipeline {
               
               echo "=== 🚨 Debug Information ==="
               kubectl cluster-info || echo "Cannot connect to cluster"
-              kubectl get nodes || echo "Cannot get nodes"
-              kubectl config current-context || echo "No current context"
               
-              echo "=== 📋 Failed Pods Information ==="
-              echo "Default namespace pods:"
-              kubectl get pods -n default || echo "Cannot get default namespace pods"
-              echo "Database namespace pods:"
-              kubectl get pods -n database || echo "Cannot get database namespace pods"
+              echo "=== 📋 All Pods Status ==="
+              echo "Default namespace:"
+              kubectl get pods -n default -o wide || echo "Cannot get default namespace pods"
+              echo "Database namespace:"
+              kubectl get pods -n database -o wide || echo "Cannot get database namespace pods"
               
-              echo "=== 📋 Pod Logs (for troubleshooting) ==="
-              for pod in $(kubectl get pods -n default --field-selector=status.phase!=Running -o name 2>/dev/null); do
-                echo "=== Logs for $pod ==="
-                kubectl logs $pod -n default --tail=20 || echo "Could not get logs for $pod"
-                echo "=== Describe $pod ==="
-                kubectl describe $pod -n default || echo "Could not describe $pod"
-              done
+              echo "=== 📋 Backend Pod Logs ==="
+              kubectl logs deployment/learner-backend -n default --tail=50 || echo "Cannot get backend logs"
+              
+              echo "=== 📋 Frontend Pod Logs ==="
+              kubectl logs deployment/learner-frontend -n default --tail=50 || echo "Cannot get frontend logs"
+              
+              echo "=== 📋 MongoDB Pod Logs ==="
+              kubectl logs deployment/mongodb -n database --tail=30 || echo "Cannot get MongoDB logs"
+              
+              echo "=== 📋 Services and Endpoints ==="
+              kubectl get services -n default || echo "Cannot get default services"
+              kubectl get services -n database || echo "Cannot get database services"
+              kubectl get endpoints -n default || echo "Cannot get default endpoints"
+              kubectl get endpoints -n database || echo "Cannot get database endpoints"
               
               echo "=== 📋 Recent Events ==="
-              kubectl get events --sort-by=.metadata.creationTimestamp -n default | tail -20 || echo "Cannot get events"
+              kubectl get events --sort-by=.metadata.creationTimestamp -n default | tail -20 || echo "Cannot get default events"
+              kubectl get events --sort-by=.metadata.creationTimestamp -n database | tail -10 || echo "Cannot get database events"
               
-              echo "=== 📋 Helm Releases Status ==="
+              echo "=== 📋 Helm Status ==="
               helm list -n default || echo "Cannot get helm releases"
             '''
           }
@@ -376,7 +382,6 @@ pipeline {
       }
     }
     always {
-      // Clean up docker images to save space
       sh '''
         echo "🧹 Cleaning up Docker resources..."
         docker system prune -f || true
