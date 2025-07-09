@@ -11,10 +11,12 @@ pipeline {
   }
 
   stages {
-
     stage('Configure AWS CLI for EKS') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: "${env.AWS_CREDS_ID}"
+        ]]) {
           sh '''
             aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
           '''
@@ -24,18 +26,22 @@ pipeline {
 
     stage('Clone Backend Repo') {
       steps {
-        git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend'
+        git url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend', branch: 'main'
       }
     }
 
     stage('Build & Push Backend Image') {
       steps {
-        withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-          sh """
+        withCredentials([usernamePassword(
+          credentialsId: "${env.DOCKER_CREDS_ID}",
+          usernameVariable: 'USERNAME',
+          passwordVariable: 'PASSWORD'
+        )]) {
+          sh '''
             docker build -t $BACKEND_IMAGE .
-            echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
+            echo $PASSWORD | docker login -u $USERNAME --password-stdin
             docker push $BACKEND_IMAGE
-          """
+          '''
         }
       }
     }
@@ -43,7 +49,7 @@ pipeline {
     stage('Clone Frontend Repo') {
       steps {
         dir('frontend') {
-          git branch: 'main', url: 'https://github.com/UnpredictablePrashant/learnerReportCS_frontend'
+          git url: 'https://github.com/UnpredictablePrashant/learnerReportCS_frontend', branch: 'main'
         }
       }
     }
@@ -51,12 +57,16 @@ pipeline {
     stage('Build & Push Frontend Image') {
       steps {
         dir('frontend') {
-          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
-            sh """
+          withCredentials([usernamePassword(
+            credentialsId: "${env.DOCKER_CREDS_ID}",
+            usernameVariable: 'USERNAME',
+            passwordVariable: 'PASSWORD'
+          )]) {
+            sh '''
               docker build -t $FRONTEND_IMAGE .
-              echo \$PASSWORD | docker login -u \$USERNAME --password-stdin
+              echo $PASSWORD | docker login -u $USERNAME --password-stdin
               docker push $FRONTEND_IMAGE
-            """
+            '''
           }
         }
       }
@@ -64,13 +74,13 @@ pipeline {
 
     stage('Deploy to EKS via Helm') {
       steps {
-        dir('helm') {
-          sh """
+        dir('mern-deployment/helm') {
+          sh '''
             helm upgrade --install mern ./mern-chart \
               --set backend.image=$BACKEND_IMAGE \
               --set frontend.image=$FRONTEND_IMAGE \
               --namespace default
-          """
+          '''
         }
       }
     }
@@ -78,10 +88,10 @@ pipeline {
 
   post {
     success {
-      echo '✅ Deployment Successful!'
+      echo '✅ All stages executed successfully!'
     }
     failure {
-      echo '❌ Build Failed!'
+      echo '❌ Pipeline failed. Please check the logs.'
     }
   }
 }
