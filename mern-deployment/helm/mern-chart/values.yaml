@@ -2,11 +2,11 @@ backend:
   name: learner-backend
   image: xxradeonxfx/learner-backend:latest
   replicas: 1
-  port: 5000
+  port: 3000
   service:
     type: ClusterIP
-    port: 5000
-    targetPort: 5000
+    port: 3000
+    targetPort: 3000
   env:
     - name: NODE_ENV
       value: "production"
@@ -21,7 +21,7 @@ backend:
     - name: DB_NAME
       value: "learnerdb"
     - name: PORT
-      value: "5000"
+      value: "3000"
 
 frontend:
   name: learner-frontend
