@@ -316,6 +316,35 @@ EOF
               echo "Validating Helm chart..."
               helm lint .
               
+              # Check for existing Helm releases and conflicting deployments
+              echo "Checking for existing Helm releases..."
+              helm list -n default || echo "No existing releases found"
+              
+              echo "Checking for existing deployments..."
+              kubectl get deployments -n default || echo "No existing deployments found"
+              
+              # Clean up any conflicting resources first
+              echo "Cleaning up any existing conflicting resources..."
+              
+              # Delete existing Helm releases that might conflict
+              helm uninstall mern -n default 2>/dev/null || echo "No 'mern' release to uninstall"
+              helm uninstall learner-app -n default 2>/dev/null || echo "No 'learner-app' release to uninstall"
+              
+              # Delete existing deployments and services that might conflict
+              kubectl delete deployment learner-backend -n default 2>/dev/null || echo "No learner-backend deployment to delete"
+              kubectl delete deployment learner-frontend -n default 2>/dev/null || echo "No learner-frontend deployment to delete"
+              kubectl delete service learner-backend-service -n default 2>/dev/null || echo "No learner-backend-service to delete"
+              kubectl delete service learner-frontend-service -n default 2>/dev/null || echo "No learner-frontend-service to delete"
+              
+              # Wait a moment for resources to be fully deleted
+              echo "Waiting for resources to be fully deleted..."
+              sleep 10
+              
+              # Verify cleanup
+              echo "Verifying cleanup..."
+              kubectl get deployments -n default | grep learner || echo "No learner deployments found - good!"
+              kubectl get services -n default | grep learner || echo "No learner services found - good!"
+              
               # Show what will be deployed
               echo "Helm template preview:"
               helm template learner-app . \\
@@ -339,8 +368,12 @@ EOF
               
               # Show deployment status
               echo "Deployment status:"
-              kubectl rollout status deployment/learner-backend -n default
-              kubectl rollout status deployment/learner-frontend -n default
+              kubectl rollout status deployment/learner-backend -n default --timeout=300s
+              kubectl rollout status deployment/learner-frontend -n default --timeout=300s
+              
+              # Show Helm release status
+              echo "Helm release status:"
+              helm status learner-app -n default
             '''
           }
         }
