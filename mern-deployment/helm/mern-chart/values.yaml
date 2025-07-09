@@ -1,13 +1,79 @@
-replicaCount: 1
+# Default values for mern-chart
+# This is a YAML-formatted file.
 
-frontend:
-  image: xxradeonxfx/learner-frontend:latest
-  containerPort: 3000
-  nodePort: 30679
-
+# Backend configuration
 backend:
+  name: learner-backend
   image: xxradeonxfx/learner-backend:latest
-  containerPort: 5000
-  mongoUri: "mongodb://mongodb-service.database.svc.cluster.local:27017/"
+  replicas: 2
+  port: 3000
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+  env:
+    - name: NODE_ENV
+      value: "production"
+    - name: MONGODB_URI
+      value: "mongodb://mongodb-service.database.svc.cluster.local:27017/learnerdb"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
 
-resources: {}
+# Frontend configuration
+frontend:
+  name: learner-frontend
+  image: xxradeonxfx/learner-frontend:latest
+  replicas: 2
+  port: 3000
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 3000
+  env:
+    - name: REACT_APP_API_URL
+      value: "http://learner-backend-service:3000"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: learner-app.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod Security Context
+podSecurityContext: {}
+
+# Security Context
+securityContext: {}
+
+# Node Selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
