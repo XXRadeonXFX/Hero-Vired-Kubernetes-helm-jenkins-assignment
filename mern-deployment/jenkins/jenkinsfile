@@ -11,6 +11,7 @@ pipeline {
   }
 
   stages {
+
     stage('Configure AWS CLI for EKS') {
       steps {
         withCredentials([[
@@ -24,39 +25,27 @@ pipeline {
       }
     }
 
-    stage('Clone Backend Repo') {
-      steps {
-        git url: 'https://github.com/UnpredictablePrashant/learnerReportCS_backend', branch: 'main'
-      }
-    }
-
     stage('Build & Push Backend Image') {
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: "${env.DOCKER_CREDS_ID}",
-          usernameVariable: 'USERNAME',
-          passwordVariable: 'PASSWORD'
-        )]) {
-          sh '''
-            docker build -t $BACKEND_IMAGE .
-            echo $PASSWORD | docker login -u $USERNAME --password-stdin
-            docker push $BACKEND_IMAGE
-          '''
-        }
-      }
-    }
-
-    stage('Clone Frontend Repo') {
-      steps {
-        dir('frontend') {
-          git url: 'https://github.com/UnpredictablePrashant/learnerReportCS_frontend', branch: 'main'
+        dir('learnerReportCS_backend') {
+          withCredentials([usernamePassword(
+            credentialsId: "${env.DOCKER_CREDS_ID}",
+            usernameVariable: 'USERNAME',
+            passwordVariable: 'PASSWORD'
+          )]) {
+            sh '''
+              docker build -t $BACKEND_IMAGE .
+              echo $PASSWORD | docker login -u $USERNAME --password-stdin
+              docker push $BACKEND_IMAGE
+            '''
+          }
         }
       }
     }
 
     stage('Build & Push Frontend Image') {
       steps {
-        dir('frontend') {
+        dir('learnerReportCS_frontend') {
           withCredentials([usernamePassword(
             credentialsId: "${env.DOCKER_CREDS_ID}",
             usernameVariable: 'USERNAME',
