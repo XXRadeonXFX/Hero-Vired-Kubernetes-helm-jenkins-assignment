@@ -26,10 +26,10 @@ pipeline {
     stage('Build & Push Backend Image') {
       steps {
         dir('learnerReportCS_backend') {
-          withCredentials([string(credentialsId: "${DOCKER_CREDS_ID}", variable: 'PASSWORD')]) {
+          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             sh '''
               docker build -t $BACKEND_IMAGE .
-              echo "$PASSWORD" | docker login -u xxradeonxfx --password-stdin
+              echo "$PASSWORD" | docker login -u $USERNAME --password-stdin
               docker push $BACKEND_IMAGE
             '''
           }
@@ -40,10 +40,10 @@ pipeline {
     stage('Build & Push Frontend Image') {
       steps {
         dir('learnerReportCS_frontend') {
-          withCredentials([string(credentialsId: "${DOCKER_CREDS_ID}", variable: 'PASSWORD')]) {
+          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             sh '''
               docker build -t $FRONTEND_IMAGE .
-              echo "$PASSWORD" | docker login -u xxradeonxfx --password-stdin
+              echo "$PASSWORD" | docker login -u $USERNAME --password-stdin
               docker push $FRONTEND_IMAGE
             '''
           }
@@ -65,18 +65,23 @@ pipeline {
     stage('Deploy to EKS via Helm') {
       steps {
         dir('mern-deployment/helm') {
-          sh 'helm upgrade --install mern ./mern-chart'
+          sh '''
+            helm upgrade --install mern ./mern-chart \
+              --set backend.image=$BACKEND_IMAGE \
+              --set frontend.image=$FRONTEND_IMAGE \
+              --namespace default
+          '''
         }
       }
     }
   }
 
   post {
+    success {
+      echo '✅ Deployment completed successfully!'
+    }
     failure {
       echo '❌ Pipeline failed. Please check the logs.'
-    }
-    success {
-      echo '✅ Deployment successful!'
     }
   }
 }
