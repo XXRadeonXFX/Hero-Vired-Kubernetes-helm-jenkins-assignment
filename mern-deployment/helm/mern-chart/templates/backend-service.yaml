@@ -4,16 +4,11 @@ metadata:
   name: {{ .Values.backend.name }}-service
   labels:
     app: {{ .Values.backend.name }}
-    chart: {{ include "mern-chart.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
 spec:
   type: {{ .Values.backend.service.type }}
   ports:
     - port: {{ .Values.backend.service.port }}
       targetPort: {{ .Values.backend.service.targetPort }}
       protocol: TCP
-      name: http
   selector:
     app: {{ .Values.backend.name }}
-    release: {{ .Release.Name }}
