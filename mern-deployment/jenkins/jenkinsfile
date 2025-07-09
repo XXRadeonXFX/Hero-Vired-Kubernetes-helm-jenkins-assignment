@@ -8,7 +8,7 @@ pipeline {
     FRONTEND_IMAGE  = "xxradeonxfx/learner-frontend:latest"
     CLUSTER_NAME    = "prince-eks"
     REGION          = "ap-south-1"
-    KUBECONFIG      = '/var/lib/jenkins/.kube/config'
+    KUBECONFIG      = "/var/lib/jenkins/.kube/config"
   }
 
   stages {
@@ -20,11 +20,13 @@ pipeline {
 
     stage('Configure AWS CLI for EKS') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${env.AWS_CREDS_ID}"]]) {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CREDS_ID}"]]) {
           sh '''
-            mkdir -p ~/.kube
-            aws eks update-kubeconfig --region ${REGION} --name ${CLUSTER_NAME}
-            kubectl config use-context arn:aws:eks:${REGION}:$(aws sts get-caller-identity --query Account --output text):cluster/${CLUSTER_NAME}
+            mkdir -p $(dirname "$KUBECONFIG")
+            export KUBECONFIG=$KUBECONFIG
+            aws eks update-kubeconfig --region $REGION --name $CLUSTER_NAME
+            kubectl config use-context arn:aws:eks:$REGION:$(aws sts get-caller-identity --query Account --output text):cluster/$CLUSTER_NAME
+            kubectl get nodes
           '''
         }
       }
@@ -33,11 +35,11 @@ pipeline {
     stage('Build & Push Backend Image') {
       steps {
         dir('learnerReportCS_backend') {
-          withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             sh '''
-              docker build -t ${BACKEND_IMAGE} .
+              docker build -t $BACKEND_IMAGE .
               echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
-              docker push ${BACKEND_IMAGE}
+              docker push $BACKEND_IMAGE
             '''
           }
         }
@@ -47,11 +49,11 @@ pipeline {
     stage('Build & Push Frontend Image') {
       steps {
         dir('learnerReportCS_frontend') {
-          withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+          withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
             sh '''
-              docker build -t ${FRONTEND_IMAGE} .
+              docker build -t $FRONTEND_IMAGE .
               echo "$PASSWORD" | docker login -u "$USERNAME" --password-stdin
-              docker push ${FRONTEND_IMAGE}
+              docker push $FRONTEND_IMAGE
             '''
           }
         }
@@ -62,10 +64,10 @@ pipeline {
       steps {
         dir('mongodb') {
           sh '''
-            echo "Using KUBECONFIG=${KUBECONFIG}"
+            export KUBECONFIG=$KUBECONFIG
             kubectl get namespace database || kubectl create namespace database
-            kubectl apply -n database -f mongodb-deployment.yaml --validate=false
-            kubectl apply -n database -f mongodb-service.yaml --validate=false
+            kubectl apply -f mongodb-deployment.yaml -n database
+            kubectl apply -f mongodb-service.yaml -n database
           '''
         }
       }
@@ -75,6 +77,7 @@ pipeline {
       steps {
         dir('helm/mern-chart') {
           sh '''
+            export KUBECONFIG=$KUBECONFIG
             helm upgrade --install learner-app . --namespace default --wait
           '''
         }
@@ -84,10 +87,10 @@ pipeline {
 
   post {
     success {
-      echo "✅ Deployment completed successfully!"
+      echo "✅ Deployment successful!"
     }
     failure {
-      echo "❌ Pipeline failed. Please check the logs."
+      echo "❌ Pipeline failed. Check the logs."
     }
   }
 }
